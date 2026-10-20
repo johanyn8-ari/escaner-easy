@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   escanear:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04      # versión fija (ubuntu-latest está migrando a Ubuntu 26 y podría romper Playwright)
     timeout-minutes: 330
     env:
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -34,6 +34,15 @@ jobs:
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
+
+      - name: Comprobar que el script está en el repositorio
+        run: |
+          ls -la
+          if [ ! -f escaner_easy.py ]; then
+            echo "ERROR: no encuentro escaner_easy.py en la carpeta principal del repositorio."
+            echo "Revisa que el archivo se llame exactamente escaner_easy.py (sin v14, v15, etc.)."
+            exit 1
+          fi
 
       - name: Preparar Python
         uses: actions/setup-python@v5
@@ -55,7 +64,7 @@ jobs:
           fi
 
       - name: Escanear ofertas
-        run: python escaner_easy.py
+        run: python -u escaner_easy.py
 
       - name: Guardar el historial en el repositorio
         if: always()
