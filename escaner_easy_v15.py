@@ -83,14 +83,14 @@ PAUSA_SEG = 0.5         # pausa de cada revisor entre un producto y otro
 SOLO_CONFIRMADOS = True # True = deja solo productos con botón "Añadir al carrito" visible
                         # (si no se puede confirmar que están disponibles, se descartan)
 MAX_PAGINAS = 60        # tope de seguridad: máximo de páginas que recorre
-SALIDA = os.path.expanduser("~/Desktop/ofertas_easy_70.csv")
+SALIDA = os.environ.get("EASY_SALIDA") or os.path.expanduser("~/Desktop/ofertas_easy_70.csv")
 # Aquí se guarda tu comuna de entrega (se crea con: python escaner_easy.py --configurar-ubicacion)
 ESTADO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "easy_ubicacion.json")
 # Cada dirección tiene su propio historial (un archivo por dirección) para comparar
 # entre escaneos solo contra lo que esa misma dirección mostró la vez anterior.
 CARPETA_HISTORIALES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "historiales")
 CSV_POR_URL = True      # True = además del CSV con todo, guarda un CSV por cada dirección
-CARPETA_POR_URL = os.path.expanduser("~/Desktop/ofertas_easy_por_url")
+CARPETA_POR_URL = os.environ.get("EASY_CARPETA_POR_URL") or os.path.expanduser("~/Desktop/ofertas_easy_por_url")
 
 # --- Avisos por Telegram (se activan con: python3 escaner_easy.py --configurar-telegram) ---
 AVISAR_TELEGRAM = True      # False = no manda nada aunque Telegram esté configurado
@@ -713,7 +713,13 @@ def telegram_api(token, metodo, datos=None):
 
 
 def cargar_telegram():
-    """Devuelve (token, chat_id) si Telegram está configurado; si no, None."""
+    """Devuelve (token, chat_id) si Telegram está configurado; si no, None.
+    Primero mira las variables de entorno TELEGRAM_TOKEN y TELEGRAM_CHAT_ID (para la nube)
+    y si no están, el archivo telegram.json (para tu Mac)."""
+    token = os.environ.get("TELEGRAM_TOKEN", "").strip()
+    chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if token and chat:
+        return token, chat
     try:
         with open(ARCHIVO_TELEGRAM, encoding="utf-8") as f:
             d = json.load(f)
@@ -895,15 +901,19 @@ def main():
     if AVISAR_TELEGRAM and not cargar_telegram():
         print("Telegram sin configurar (para recibir avisos: python3 escaner_easy.py --configurar-telegram)\n")
 
+    # Para pruebas (o en la nube) se puede limitar a las primeras N direcciones: EASY_LIMITE_URLS=2
+    limite = int(os.environ.get("EASY_LIMITE_URLS", "0") or 0)
+    urls = URLS[:limite] if limite > 0 else URLS
+    tarjetas_total = 0
     todas = []
     por_url = []        # (nombre, ofertas, primera_vez) de cada dirección
     cache_corrida = {}  # lo verificado en este escaneo, para no repetir entre direcciones
 
     # Cada dirección se procesa completa (recorrer, filtrar, verificar, comparar con SU
     # historial) antes de pasar a la siguiente. El avance se guarda después de cada una.
-    for n, url in enumerate(URLS, 1):
+    for n, url in enumerate(urls, 1):
         nombre = nombre_corto(url)
-        print(f"\n=== Dirección {n} de {len(URLS)}: {url}")
+        print(f"\n=== Dirección {n} de {len(urls)}: {url}")
         ruta = ruta_historial(url)
         historial = cargar_historial(ruta)
         primera_vez = not historial
@@ -913,6 +923,7 @@ def main():
             print(f"No pude recorrer esta dirección ({err}). Sigo con la siguiente.")
             continue
 
+        tarjetas_total += len(tarjetas)
         ofertas = ordenar(procesar_url(tarjetas, historial, cache_corrida, nombre))
         guardar_historial(historial, ruta)
         if CSV_POR_URL:
@@ -948,6 +959,20 @@ def main():
             print(f"  Un archivo por dirección:    {CARPETA_POR_URL}")
     else:
         print("\nNo se encontraron ofertas. Revisa las direcciones o ajusta los filtros.")
+
+    # Si no se leyó NINGÚN producto, algo falló (por ejemplo, el sitio bloqueó la conexión):
+    # se sale con error para que, en la nube, se note.
+    if tarjetas_total == 0:
+        print("\nERROR: no se leyó ningún producto de ninguna dirección.")
+        sys.exit(1)
+
+    # Aviso final opcional (se activa con EASY_RESUMEN_FINAL=1): así sabes que corrió aunque no haya novedades
+    if os.environ.get("EASY_RESUMEN_FINAL") == "1":
+        novedades_total = sum(1 for o in todas if o["novedad"])
+        enviar_telegram(
+            f"✅ Escaneo de Easy terminado: {len(por_url)} de {len(urls)} direcciones leídas, "
+            f"{len(unir(todas))} ofertas, {novedades_total} novedades."
+        )
 
 
 if __name__ == "__main__":
