@@ -34,7 +34,6 @@ from playwright.sync_api import sync_playwright
 # Agrega una dirección por línea, entre comillas y con una coma al final.
 # Si un producto sale en dos categorías, se cuenta una sola vez.
 URLS = [
-    "https://www.easy.cl/cluster/6826",
     "https://www.easy.cl/decoracion-e-iluminacion/iluminacion",
     "https://www.easy.cl/search/organizacion",
     "https://www.easy.cl/decoracion-e-iluminacion/especial-navidad",
