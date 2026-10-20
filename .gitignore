@@ -1,0 +1,5 @@
+telegram.json
+easy_ubicacion.json
+salida/
+*.csv
+__pycache__/
