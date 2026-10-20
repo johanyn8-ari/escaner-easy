@@ -91,6 +91,8 @@ ESTADO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "easy_ubicacio
 CARPETA_HISTORIALES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "historiales")
 CSV_POR_URL = True      # True = además del CSV con todo, guarda un CSV por cada dirección
 CARPETA_POR_URL = os.environ.get("EASY_CARPETA_POR_URL") or os.path.expanduser("~/Desktop/ofertas_easy_por_url")
+# Si una dirección no trae ninguna tarjeta, aquí se guarda una captura de lo que veía el navegador
+CARPETA_DIAGNOSTICO = os.environ.get("EASY_DIAGNOSTICO") or os.path.join(os.path.dirname(SALIDA), "diagnostico")
 
 # --- Avisos por Telegram (se activan con: python3 escaner_easy.py --configurar-telegram) ---
 AVISAR_TELEGRAM = True      # False = no manda nada aunque Telegram esté configurado
@@ -247,9 +249,33 @@ def hacer_clic_siguiente(page, pagina_actual):
     return False
 
 
+DIAGNOSTICOS = []  # qué veía el navegador en las direcciones que no trajeron ninguna tarjeta
+
+
+def registrar_diagnostico(page, url, estado_http):
+    """Cuando una dirección no trae ninguna tarjeta, anota qué estaba viendo realmente el navegador."""
+    try:
+        titulo = page.title()
+    except Exception:
+        titulo = "?"
+    try:
+        texto = " ".join(page.inner_text("body").split())[:220]
+    except Exception:
+        texto = "?"
+    linea = f"[{nombre_corto(url)}] HTTP {estado_http} | titulo: {titulo!r} | texto: {texto!r}"
+    DIAGNOSTICOS.append(linea)
+    print(f"Diagnóstico: {linea}")
+    try:
+        os.makedirs(CARPETA_DIAGNOSTICO, exist_ok=True)
+        page.screenshot(path=os.path.join(CARPETA_DIAGNOSTICO, f"sin_tarjetas_{nombre_corto(url)}.png"))
+    except Exception:
+        pass
+
+
 def raspar_url(page, url, vistos):
     """Recorre todas las páginas del paginado de UNA dirección y agrega las tarjetas a 'vistos'."""
-    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    respuesta = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    estado_http = respuesta.status if respuesta else None
     try:
         page.wait_for_load_state("load", timeout=20000)
     except Exception:
@@ -261,6 +287,8 @@ def raspar_url(page, url, vistos):
     while pagina <= MAX_PAGINAS:
         cargar_pagina(page)
         items = evaluar(page, JS_EXTRAER)
+        if pagina == 1 and not items:
+            registrar_diagnostico(page, url, estado_http)
         nuevos_url = 0
         nuevos = 0
         for it in items:
@@ -963,7 +991,9 @@ def main():
     # Si no se leyó NINGÚN producto, algo falló (por ejemplo, el sitio bloqueó la conexión):
     # se sale con error para que, en la nube, se note.
     if tarjetas_total == 0:
-        print("\nERROR: no se leyó ningún producto de ninguna dirección.")
+        for linea in DIAGNOSTICOS[:2]:
+            print(f"Lo que veía el navegador -> {linea}")
+        print("ERROR: no se leyó ningún producto de ninguna dirección.")
         sys.exit(1)
 
     # Aviso final opcional (se activa con EASY_RESUMEN_FINAL=1): así sabes que corrió aunque no haya novedades
