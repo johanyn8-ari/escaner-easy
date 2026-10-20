@@ -39,10 +39,10 @@ jobs:
         run: |
           ls -la
           if [ ! -f escaner_easy.py ]; then
-            echo "ERROR: no encuentro escaner_easy.py en la carpeta principal del repositorio."
-            echo "Revisa que el archivo se llame exactamente escaner_easy.py (sin v14, v15, etc.)."
+            echo "::error title=Falta el script::No encuentro escaner_easy.py en la carpeta principal del repositorio. Debe llamarse exactamente escaner_easy.py (sin v14, v15, etc.)."
             exit 1
           fi
+          echo "::notice title=Paso 1 de 4 listo (flujo version 5)::El script escaner_easy.py esta en el repositorio."
 
       - name: Preparar Python
         uses: actions/setup-python@v5
@@ -51,20 +51,30 @@ jobs:
 
       - name: Instalar Playwright y el navegador
         run: |
-          pip install playwright
-          playwright install --with-deps chromium
+          pip install playwright || { echo "::error title=Fallo en pip install playwright::Revisa el registro de este paso."; exit 1; }
+          playwright install --with-deps chromium || { echo "::error title=Fallo al instalar el navegador (playwright install)::Revisa el registro de este paso."; exit 1; }
+          echo "::notice title=Paso 2 de 4 listo::Playwright y el navegador estan instalados."
 
       - name: Restaurar la comuna (ubicación) guardada
         run: |
           if [ -n "$EASY_UBICACION_B64" ]; then
-            echo "$EASY_UBICACION_B64" | base64 -d | gunzip > easy_ubicacion.json
+            echo "$EASY_UBICACION_B64" | base64 -d | gunzip > easy_ubicacion.json || { echo "::error title=El secreto EASY_UBICACION_B64 no es valido::Vuelve a generarlo con: gzip -c easy_ubicacion.json | base64 | pbcopy y pegalo de nuevo."; exit 1; }
             echo "Ubicación restaurada."
           else
             echo "Aviso: no existe el secreto EASY_UBICACION_B64; se usará la ubicación por defecto del sitio."
           fi
+          echo "::notice title=Paso 3 de 4 listo::Ubicacion preparada (si no hay secreto, se usa la del sitio)."
 
       - name: Escanear ofertas
-        run: python -u escaner_easy.py
+        run: |
+          set -o pipefail
+          python -u escaner_easy.py 2>&1 | tee ejecucion.log || {
+            codigo=$?
+            resumen=$(tail -n 8 ejecucion.log | tr '\n' ' ' | tr -d '\r' | cut -c1-900)
+            echo "::error title=El escaneo terminó con error (código ${codigo})::${resumen}"
+            exit ${codigo}
+          }
+          echo "::notice title=Paso 4 de 4 listo::El escaneo termino sin errores."
 
       - name: Guardar el historial en el repositorio
         if: always()
