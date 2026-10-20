@@ -1,0 +1,84 @@
+name: Escáner de ofertas Easy
+
+on:
+  schedule:
+    # GitHub usa hora UTC. 08:00 UTC = 05:00 en Chile en horario de verano (04:00 en invierno).
+    # Formato: minuto hora día mes día-de-semana.  "0 8 * * *" = todos los días.
+    - cron: "0 8 * * *"
+  workflow_dispatch:           # permite ejecutarlo a mano desde la pestaña Actions
+    inputs:
+      limite_urls:
+        description: "Para pruebas: escanear solo las primeras N direcciones (0 = todas)"
+        default: "2"
+
+permissions:
+  contents: write              # necesario para guardar el historial en el repositorio
+
+concurrency:
+  group: escaner-easy          # evita que dos escaneos corran a la vez
+  cancel-in-progress: false
+
+jobs:
+  escanear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      EASY_UBICACION_B64: ${{ secrets.EASY_UBICACION_B64 }}
+      EASY_LIMITE_URLS: ${{ github.event.inputs.limite_urls || '0' }}
+      EASY_RESUMEN_FINAL: "1"  # te escribe al terminar, aunque no haya novedades (borra esta línea si no lo quieres)
+      EASY_SALIDA: salida/ofertas_easy.csv
+      EASY_CARPETA_POR_URL: salida/por_url
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Playwright y el navegador
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Restaurar la comuna (ubicación) guardada
+        run: |
+          if [ -n "$EASY_UBICACION_B64" ]; then
+            echo "$EASY_UBICACION_B64" | base64 -d | gunzip > easy_ubicacion.json
+            echo "Ubicación restaurada."
+          else
+            echo "Aviso: no existe el secreto EASY_UBICACION_B64; se usará la ubicación por defecto del sitio."
+          fi
+
+      - name: Escanear ofertas
+        run: python escaner_easy.py
+
+      - name: Guardar el historial en el repositorio
+        if: always()
+        run: |
+          git config user.name "escaner-easy"
+          git config user.email "escaner-easy@users.noreply.github.com"
+          git add historiales
+          git diff --cached --quiet || git commit -m "Actualizar historial $(date -u +%F)"
+          git push || echo "No se pudo guardar el historial (se reintentará en la próxima ejecución)."
+
+      - name: Guardar los CSV (descargables por 7 días)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ofertas-csv
+          path: salida/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Avisar por Telegram si falló
+        if: failure()
+        run: |
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=⚠️ El escáner de ofertas de Easy falló. Detalle: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            > /dev/null
