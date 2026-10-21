@@ -1,0 +1,60 @@
+name: Probar cualquier dirección (desde GitHub)
+
+# Ejecútalo a mano desde la pestaña Actions. Escribe las direcciones separadas por espacio o coma.
+# Sirve para saber si un sitio responde bien a los servidores de GitHub.
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "Direcciones a probar, separadas por espacio o coma"
+        required: true
+        default: "https://www.easy.cl https://www.example.com"
+      modo:
+        description: "navegador = ve lo que vería una persona (más fiel). rapido = una petición simple (más veloz)"
+        type: choice
+        options:
+          - navegador
+          - rapido
+        default: navegador
+
+permissions:
+  contents: read
+
+jobs:
+  probar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      URLS_A_PROBAR: ${{ github.event.inputs.urls }}
+      MODO: ${{ github.event.inputs.modo }}
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Comprobar que probar_urls.py está en el repositorio
+        run: |
+          if [ ! -f probar_urls.py ]; then
+            echo "::error title=Falta el script::No encuentro probar_urls.py en la carpeta principal del repositorio. Súbelo con Add file > Upload files."
+            exit 1
+          fi
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Playwright y el navegador (solo en modo navegador)
+        if: ${{ github.event.inputs.modo == 'navegador' }}
+        run: |
+          pip install playwright || { echo "::error title=Fallo en pip install playwright::Revisa el registro de este paso."; exit 1; }
+          playwright install --with-deps chromium || { echo "::error title=Fallo al instalar el navegador (playwright install)::Revisa el registro de este paso."; exit 1; }
+
+      - name: Probar las direcciones
+        run: |
+          set -f                                   # que un * en una dirección no se expanda
+          urls=$(echo "$URLS_A_PROBAR" | tr ',' ' ')
+          extra=""
+          if [ "$MODO" = "rapido" ]; then extra="--rapido"; fi
+          # Código 1 = alguna dirección no está OK: es información, no un fallo del flujo.
+          python -u probar_urls.py $extra $urls || { codigo=$?; if [ "$codigo" -eq 1 ]; then exit 0; fi; exit $codigo; }
