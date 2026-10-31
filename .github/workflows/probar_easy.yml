@@ -1,0 +1,23 @@
+name: Probar conexión a Easy
+
+# Se ejecuta a mano (pestaña Actions > "Probar conexión a Easy" > Run workflow).
+# Sirve para saber si Easy deja leer sus páginas desde los servidores de GitHub.
+on:
+  workflow_dispatch:
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Lista de prueba (una categoría normal, que se lee por HTML)
+        run: echo "https://www.easy.cl/decoracion-e-iluminacion/iluminacion" > urls_prueba_github.txt
+
+      - name: Probar lectura de Easy
+        run: python escaner_easy_api.py --prueba --urls urls_prueba_github.txt
